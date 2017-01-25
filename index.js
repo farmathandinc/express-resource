@@ -86,7 +86,7 @@ function Resource(name, actions, app) {
   // default actions
   for (var i = 0, key; i < orderedActions.length; ++i) {
     key = orderedActions[i];
-    if (actions[key]) this.mapDefaultAction(key, actions[key]);
+    if (actions[key]) this.mapDefaultAction(key, actions[key], actions);
   }
 
   // auto-loader
@@ -248,31 +248,31 @@ Resource.prototype.add = function(resource){
  * @api private
  */
 
-Resource.prototype.mapDefaultAction = function(key, fn){
+Resource.prototype.mapDefaultAction = function(key, fn, resource){
   switch (key) {
     case 'index':
-      this.get('/', fn);
+      this.get('/', fn.bind(resource));
       break;
     case 'new':
-      this.get('/new', fn);
+      this.get('/new', fn.bind(resource));
       break;
     case 'create':
-      this.post('/', fn);
+      this.post('/', fn.bind(resource));
       break;
     case 'show':
-      this.get(fn);
+      this.get(fn.bind(resource));
       break;
     case 'edit':
-      this.get('edit', fn);
+      this.get('edit', fn.bind(resource));
       break;
     case 'update':
-      this.put(fn);
+      this.put(fn.bind(resource));
       break;
     case 'patch':
-      this.patch(fn);
+      this.patch(fn.bind(resource));
       break;
     case 'destroy':
-      this.delete(fn);
+      this.delete(fn.bind(resource));
       break;
   }
 };
