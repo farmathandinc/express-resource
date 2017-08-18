@@ -11,6 +11,7 @@
  */
 
 var methods = require('methods')
+	, Promise = require('bluebird')
   , debug = require('debug')('express-resource')
   , lingo = require('lingo')
   , en = lingo.en;
@@ -240,6 +241,23 @@ Resource.prototype.add = function(resource){
   return this;
 };
 
+
+const hookUpActionMethod = (fn, resource) => {
+	fn = fn.bind(resource);
+
+  return (req, res, next) => {
+    const stack = [];
+
+    if (!!resource.middlewares && !!resource.middlewares.length) {
+	    stack.push(Promise.map(resource.middlewares, middleware => middleware(req, res, next)));
+    }
+
+    stack.push(fn(req, res, next));
+
+    return stack;
+  };
+};
+
 /**
  * Map the given action `name` with a callback `fn()`.
  *
@@ -251,28 +269,28 @@ Resource.prototype.add = function(resource){
 Resource.prototype.mapDefaultAction = function(key, fn, resource){
   switch (key) {
     case 'index':
-      this.get('/', fn.bind(resource));
+      this.get('/', hookUpActionMethod(fn, resource));
       break;
     case 'new':
-      this.get('/new', fn.bind(resource));
+      this.get('/new', hookUpActionMethod(fn, resource));
       break;
     case 'create':
-      this.post('/', fn.bind(resource));
+      this.post('/', hookUpActionMethod(fn, resource));
       break;
     case 'show':
-      this.get(fn.bind(resource));
+      this.get(hookUpActionMethod(fn, resource));
       break;
     case 'edit':
-      this.get('edit', fn.bind(resource));
+      this.get('edit', hookUpActionMethod(fn, resource));
       break;
     case 'update':
-      this.put(fn.bind(resource));
+      this.put(hookUpActionMethod(fn, resource));
       break;
     case 'patch':
-      this.patch(fn.bind(resource));
+      this.patch(hookUpActionMethod(fn, resource));
       break;
     case 'destroy':
-      this.delete(fn.bind(resource));
+      this.delete(hookUpActionMethod(fn, resource));
       break;
   }
 };
