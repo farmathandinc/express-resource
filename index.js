@@ -198,7 +198,7 @@ Resource.prototype.map = function(method, path, fn){
   };
 
   // apply the route
-  this.app[method](route, function(req, res, next){
+  this.app[method](route, this.middlewares || [], function(req, res, next){
     req.format = req.params.format || req.format || self.format;
     if (req.format) res.type(req.format);
     if ('object' === typeof fn) {
@@ -257,21 +257,7 @@ Resource.prototype.add = function(resource){
 };
 
 
-const hookUpActionMethod = (fn, resource) => {
-	fn = fn.bind(resource);
-
-  return (req, res, next) => {
-    const stack = [];
-
-    if (!!resource.middlewares && !!resource.middlewares.length) {
-	    stack.push(Promise.map(resource.middlewares, middleware => middleware(req, res, next)));
-    }
-
-    stack.push(fn(req, res, next));
-
-    return stack;
-  };
-};
+const hookUpActionMethod = ( fn, resource ) => fn.bind( resource );
 
 /**
  * Map the given action `name` with a callback `fn()`.
