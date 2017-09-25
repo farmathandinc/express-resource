@@ -84,10 +84,25 @@ function Resource(name, actions, app) {
   this.id = actions.id || this.defaultId;
   this.param = ':' + this.id;
 
+  /*
+  if ( actions.customActions ) {
+    actions.customActions.forEach( ( [ httpVerb, actionName, ] ) => this[ httpVerb ](
+      actionName, // action name is used as the sub-path. i.e. /fields/:Field/plow -> FieldsController#plow
+      hookUpActionMethod( actions[ actionName ], actions )
+    ) );
+  }
+  */
+
   // default actions
   for (var i = 0, key; i < orderedActions.length; ++i) {
     key = orderedActions[i];
-    if (actions[key]) this.mapDefaultAction(key, actions[key], actions);
+    if (
+      actions[key]
+      && (
+        ! actions.only
+	|| actions.only.includes( key )
+      )
+    ) this.mapDefaultAction(key, actions[key], actions);
   }
 
   // auto-loader
