@@ -10,11 +10,10 @@
  * Module dependencies.
  */
 
-var methods = require('methods')
-	, Promise = require('bluebird')
-  , debug = require('debug')('express-resource')
-  , lingo = require('lingo')
-  , en = lingo.en;
+const methods = require( 'methods' );
+const Promise = require( 'bluebird' );
+const debug = require( 'debug' )( 'express-resource' );
+const en = require( 'lingo' ).en;
 
 /**
  * Pre-defined action ordering.
@@ -37,6 +36,7 @@ var orderedActions = [
 
 exports = module.exports = function(app) {
   app.resource = resource.bind(app);
+  app.resources = {};
   return app;
 };
 
@@ -49,15 +49,12 @@ exports = module.exports = function(app) {
  * @api public
  */
 function resource(name, actions, opts){
-  var options = actions || {};
   if ('object' === typeof name) {
     actions = name;
     name = null;
   }
-  if (options.id) actions.id = options.id;
-  this.resources = this.resources || {};
   if (!actions) return this.resources[name] || new Resource(name, null, this);
-  for (var key in opts) options[key] = opts[key];
+  for (var key in opts) actions[key] = opts[key];
   var res = this.resources[name] = new Resource(name, actions, this);
   return res;
 }
@@ -73,25 +70,55 @@ function resource(name, actions, opts){
 
 exports.Resource = Resource;
 
+const trailingSlashIt = path =>
+	'/' !== path[ path.length -1 ]
+		? path + '/'
+		: path;
+
+const figureOutBase = providedValue => {
+	if ( ! providedValue ) {
+		return '/';
+	} else {
+		trailingSlashIt( providedValue );
+	}
+}
+
 function Resource(name, actions, app) {
-  this.name = name;
-  this.routes = {};
-  actions = actions || {};
-  this.app = app;
-  this.base = actions.base || '/';
-  if ('/' !== this.base[this.base.length - 1]) this.base += '/';
-  this.format = actions.format;
-  this.id = actions.id || this.defaultId;
-  this.param = ':' + this.id;
+	if ( ! actions ) return;
 
-  // default actions
-  for (var i = 0, key; i < orderedActions.length; ++i) {
-    key = orderedActions[i];
-    if (actions[key]) this.mapDefaultAction(key, actions[key], actions);
-  }
+	//might have to remove leading slash
+	this.name = name;
+	this.routes = {};
+	this.app = app;
+	this.base = figureOutBase( actions.base );
+	this.format = actions.format;
+	this.id = actions.id || this.defaultId;
+	this.param = ':' + this.id;
 
-  // auto-loader
-  if (actions.load) this.load(actions.load);
+	// default actions
+	orderedActions.forEach( actionName => {
+		if (
+			actions[ actionName ]
+			&& (
+				! actions.only
+				|| actions.only.includes( actionName )
+			)
+		) {
+			this.mapDefaultAction(
+				actionName,
+				actions[ actionName ],
+				actions
+			);
+		}
+	} );
+
+	actions.customActions.forEach( ( [ httpVerb, actionName, ] ) => this[ httpVerb ](
+		actionName, // action name is used as the sub-path. i.e. /fields/:Field/plow -> FieldsController#plow
+		hookUpActionMethod( actions[ actionName ], actions )
+	) );
+
+	// auto-loader
+	if ( actions.load ) this.load( actions.load );
 }
 
 /**
@@ -135,65 +162,76 @@ Resource.prototype.load = function(fn){
  * @api private
  */
 
-Resource.prototype.__defineGetter__('defaultId', function(){
+Resource.prototype.__defineGetter__( 'defaultId', function() {
   return this.name
-    ? en.singularize(this.name.split('/').pop())
+    ? en.singularize( this.name.split( '/' ).pop() )
     : 'id';
-});
+} );
+
+Resource.prototype.prepareRoute = function( path ) {
+	if ( '/' === path[0] ) { // if there is a leading slash, remove it
+		path = path.substr( 1 );
+	} else { // if there is not a leading slash
+		if ( path ) { // - if there is a sub-path provided, prefix it with e.g. ':activity/'
+			path = this.param + '/' + path;
+		} else { // if there is not a sub-path provided sub-path is e.g. ':activity'
+			path = this.param;
+		}
+	}
+
+	// setup route pathname
+	return `${ this.base }${ this.name || '' }${ this.name && path ? '/' : '' }${ path }.:format?`;
+};
 
 /**
- * Map http `method` and optional `path` to `fn`.
+ * Map http `httpVerb` and optional `path` to `action`.
  *
- * @param {String} method
+ * @param {String} httpVerb
  * @param {String|Function|Object} path
- * @param {Function} fn
+ * @param {Function} action
  * @return {Resource} for chaining
  * @api public
  */
 
-Resource.prototype.map = function(method, path, fn){
+Resource.prototype.map = function( httpVerb, path, action ){
+  if ( httpVerb instanceof Resource ) return this.add( httpVerb );
+
   var self = this
     , orig = path;
 
-  if (method instanceof Resource) return this.add(method);
-  if ('function' === typeof path) {
-    fn = path;
+  if (
+	  'function' === typeof path
+	  || 'object' === typeof path
+  ) {
+    action = path;
     path = '';
   }
-  if ('object' === typeof path) {
-    fn = path;
-    path = '';
-  }
-  if ('/' === path[0]) path = path.substr(1);
-  else path = path ? this.param + '/' + path : this.param;
-  method = method.toLowerCase();
 
-  // setup route pathname
-  var route = this.base + (this.name || '');
-  if (this.name && path) route += '/';
-  route += path;
-  route += '.:format?';
+  const route = this.prepareRoute( path );
+
+  httpVerb = httpVerb.toLowerCase();
+
 
   // register the route so we may later remove it
-  (this.routes[method] = this.routes[method] || {})[route] = {
-      method: method
+  (this.routes[httpVerb] = this.routes[httpVerb] || {})[route] = {
+      httpVerb,
     , path: route
-    , orig: orig
-    , fn: fn
+    , orig,
+    , action
   };
 
   // apply the route
-  this.app[method](route, function(req, res, next){
+  this.app[httpVerb]( route, function(req, res, next){
     req.format = req.params.format || req.format || self.format;
     if (req.format) res.type(req.format);
-    if ('object' === typeof fn) {
-      if (fn[req.format]) {
-        fn[req.format](req, res, next);
+    if ('object' === typeof action) {
+      if (action[req.format]) {
+        action[req.format](req, res, next);
       } else {
-        res.format(fn);
+        res.format(action);
       }
     } else {
-      fn(req, res, next);
+      action(req, res, next);
     }
   });
 
@@ -220,77 +258,84 @@ Resource.prototype.add = function(resource){
     + this.param + '/';
 
   // re-define previous actions
-  for (var method in resource.routes) {
-    routes = resource.routes[method];
+  for (var httpVerb in resource.routes) {
+    routes = resource.routes[httpVerb];
     for (var key in routes) {
       route = routes[key];
       delete routes[key];
-      if (method === 'destroy') method = 'delete';
+      if (httpVerb === 'destroy') httpVerb = 'delete';
       // TODO: implement `router` or `app._router.stack` here
       /*
-      app.routes[method].forEach(function(route, i){
+      app.routes[httpVerb].forEach(function(route, i){
         if (route.path === key) {
-          app.routes[method].splice(i, 1);
+          app.routes[httpVerb].splice(i, 1);
         }
       })
       */
-      resource.map(route.method, route.orig, route.fn);
+      resource.map(route.httpVerb, route.orig, route.action);
     }
   }
 
   return this;
 };
 
+const hookUpActionMethod = ( action, resource ) => {
+	action = action.bind( resource );
 
-const hookUpActionMethod = (fn, resource) => {
-	fn = fn.bind(resource);
+	return ( req, res, next ) => {
+		const stack = [];
 
-  return (req, res, next) => {
-    const stack = [];
+		if (
+			!!resource.middlewares
+			&& !!resource.middlewares.length
+		) {
+			stack.push( Promise.map(
+				resource.middlewares,
+				middleware => middleware( req, res, next )
+			) );
+		}
 
-    if (!!resource.middlewares && !!resource.middlewares.length) {
-	    stack.push(Promise.map(resource.middlewares, middleware => middleware(req, res, next)));
-    }
+		stack.push( action( req, res, next ) );
 
-    stack.push(fn(req, res, next));
-
-    return stack;
-  };
+		return stack;
+	};
 };
 
 /**
- * Map the given action `name` with a callback `fn()`.
+ * Map the given action `name` with a callback `action()`.
  *
- * @param {String} key
- * @param {Function} fn
+ * @param {String} actionName
+ * @param {Function} action
  * @api private
  */
 
-Resource.prototype.mapDefaultAction = function(key, fn, resource){
-  switch (key) {
+Resource.prototype.mapDefaultAction = function( actionName, action, resource ) {
+  const hookedUpActionMethod = hookUpActionMethod( action, resource );
+
+  switch ( actionName ) {
     case 'index':
-      this.get('/', hookUpActionMethod(fn, resource));
+      this.get( '/', hookedUpActionMethod );
       break;
     case 'new':
-      this.get('/new', hookUpActionMethod(fn, resource));
+      this.get( '/new', hookedUpActionMethod );
       break;
     case 'create':
-      this.post('/', hookUpActionMethod(fn, resource));
+      this.post( '/', hookedUpActionMethod );
       break;
     case 'show':
-      this.get(hookUpActionMethod(fn, resource));
+      this.get( hookedUpActionMethod );
       break;
     case 'edit':
-      this.get('edit', hookUpActionMethod(fn, resource));
+      this.get( 'edit', hookedUpActionMethod );
       break;
     case 'update':
-      this.put(hookUpActionMethod(fn, resource));
+      this.put( hookedUpActionMethod );
       break;
     case 'patch':
-      this.patch(hookUpActionMethod(fn, resource));
+      this.patch( hookedUpActionMethod );
       break;
     case 'destroy':
-      this.delete(hookUpActionMethod(fn, resource));
+      this.delete( hookedUpActionMethod );
       break;
   }
 };
@@ -299,13 +344,19 @@ Resource.prototype.mapDefaultAction = function(key, fn, resource){
  * Setup http verb methods.
  */
 
-methods.concat(['delete', 'all']).forEach(function(method){
-  Resource.prototype[method] = function(path, fn){
-    if ('function' === typeof path || 'object' === typeof path) {
-      fn = path;
-      path = '';
-    }
-    this.map(method, path, fn);
-    return this;
-  }
-});
+methods
+.concat( [ 'all', ] )
+.forEach( httpVerb => {
+	Resource.prototype[ httpVerb ] = ( path, action ) => {
+		if (
+			'function' === typeof path
+			|| 'object' === typeof path
+		) {
+			action = path;
+			path = '';
+		}
+
+		this.map( httpVerb, path, action );
+		return this;
+	}
+} );
