@@ -84,10 +84,25 @@ function Resource(name, actions, app) {
   this.id = actions.id || this.defaultId;
   this.param = ':' + this.id;
 
+  /*
+  if ( actions.customActions ) {
+    actions.customActions.forEach( ( [ httpVerb, actionName, ] ) => this[ httpVerb ](
+      actionName, // action name is used as the sub-path. i.e. /fields/:Field/plow -> FieldsController#plow
+      hookUpActionMethod( actions[ actionName ], actions )
+    ) );
+  }
+  */
+
   // default actions
   for (var i = 0, key; i < orderedActions.length; ++i) {
     key = orderedActions[i];
-    if (actions[key]) this.mapDefaultAction(key, actions[key], actions);
+    if (
+      actions[key]
+      && (
+        ! actions.only
+	|| actions.only.includes( key )
+      )
+    ) this.mapDefaultAction(key, actions[key], actions);
   }
 
   // auto-loader
@@ -183,7 +198,7 @@ Resource.prototype.map = function(method, path, fn){
   };
 
   // apply the route
-  this.app[method](route, function(req, res, next){
+  this.app[method](route, this.middlewares || [], function(req, res, next){
     req.format = req.params.format || req.format || self.format;
     if (req.format) res.type(req.format);
     if ('object' === typeof fn) {
@@ -242,21 +257,7 @@ Resource.prototype.add = function(resource){
 };
 
 
-const hookUpActionMethod = (fn, resource) => {
-	fn = fn.bind(resource);
-
-  return (req, res, next) => {
-    const stack = [];
-
-    if (!!resource.middlewares && !!resource.middlewares.length) {
-	    stack.push(Promise.map(resource.middlewares, middleware => middleware(req, res, next)));
-    }
-
-    stack.push(fn(req, res, next));
-
-    return stack;
-  };
-};
+const hookUpActionMethod = ( fn, resource ) => fn.bind( resource );
 
 /**
  * Map the given action `name` with a callback `fn()`.
