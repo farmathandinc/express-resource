@@ -1,3 +1,11 @@
+This is a fork of niftylettuce/express-resource.
+
+We have added:
+- `options.only` to declare when a resource should only expose specific endpoints
+- `options.customActions` to declare some custom actions
+- enables middleware to be declared inside a controller
+- enables the use of es6 classes for some real cozy controller-style api development
+
 # Express Resource
 
   express-resource provides resourceful routing to express. For Express 2.x
